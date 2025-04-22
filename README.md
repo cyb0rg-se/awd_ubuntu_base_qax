@@ -1,6 +1,6 @@
 # awd_ubuntu_base_qax
 
-本镜像适用于所以awd竞赛的flag通过访问平台某接口获取，例如通过执行`curl -k https://${IP}/Getkey/index/index 2>/dev/null`来获取flag
+本镜像适用于所有awd竞赛的flag通过访问平台某接口获取，例如通过执行`curl -k https://${IP}/Getkey/index/index 2>/dev/null`来获取flag
 
 镜像仅支持php题目
 
