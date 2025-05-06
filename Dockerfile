@@ -1,12 +1,17 @@
+# 使用Ubuntu 20.04作为基础镜像
 FROM ubuntu:20.04
 
+#定义时区参数
 ENV TZ=Asia/Shanghai
+#设置时区
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo '$TZ' > /etc/timezone
 
 # 更新apt源为清华大学镜像源
 RUN sed -i 's/http:\/\/archive.ubuntu.com\/ubuntu\//http:\/\/mirrors.tuna.tsinghua.edu.cn\/ubuntu\//g' /etc/apt/sources.list
 
 # 更新软件包列表并安装软件
+# 包含 openssh-server, vim, mysql-server, apache2, php7.4, php7.4-mysql, libapache2-mod-php7.4,
+# net-tools (ifconfig), iputils-ping, curl, 以及 python3
 RUN apt-get update && \
     apt-get install -y openssh-server vim mysql-server apache2 php7.4 php7.4-mysql libapache2-mod-php7.4 net-tools iputils-ping curl python3
 
@@ -51,8 +56,12 @@ RUN echo '<FilesMatch "^\\.">\n    Require all granted\n</FilesMatch>' | tee -a 
 # 没有下面这行mysql报错，很诡异
 RUN mkdir /nonexistent
 
+COPY ./html /var/www/html
 COPY update_flag.sh /root/update_flag.sh
+
 RUN chmod +x /root/update_flag.sh
+RUN chmod 777 -R /var/www/html
+RUN chsh -s /bin/bash ctf
 
 # 启动脚本
 CMD ["/root/update_flag.sh"]

@@ -1,90 +1,83 @@
 #!/bin/bash
 
-# Define the log file path
-LOG_FILE="/var/log/update_flag.log"
-
-# Ensure the log file exists
+# Log file path
+LOG_FILE="/root/update_flag.log"
+IMPORT_MARKER="/root/db_import_done"
+SQL_FILE="/var/www/html/db.sql"
 touch "$LOG_FILE"
 
-# Function to check if the script is already running
+# Prevent multiple instances of this script
 check_running() {
-    pidof -o %PPID -x "$0" > /dev/null
+    pidof -o %PPID -x "$0" >/dev/null 2>&1
     if [ $? -eq 0 ]; then
-        echo "$(date): Script is already running. Exiting." >> "$LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): Script is already running. Exiting." >> "$LOG_FILE"
         exit 1
     fi
 }
 
-# Function to check and start MySQL service
-check_mysql() {
-    if ! service mysql status > /dev/null 2>&1; then
-        echo "$(date): MySQL service is not running. Attempting to start..." >> "$LOG_FILE"
-        service mysql start
-        if service mysql status > /dev/null 2>&1; then
-            echo "$(date): MySQL service started successfully." >> "$LOG_FILE"
+# Check if a given port is listening; if not, restart the corresponding service
+# $1 = port number; $2 = service name
+check_service_port() {
+    local port=$1
+    local svc=$2
+
+    if ! netstat -tln 2>/dev/null | grep -qE "[:\.]${port}[[:space:]]+.*LISTEN"; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): Port ${port} is not listening; restarting ${svc}..." >> "$LOG_FILE"
+        service "$svc" restart
+
+        # Verify after restart
+        if netstat -tln 2>/dev/null | grep -qE "[:\.]${port}[[:space:]]+.*LISTEN"; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S'): ${svc} restart succeeded; port ${port} is now listening." >> "$LOG_FILE"
         else
-            echo "$(date): Failed to start MySQL service." >> "$LOG_FILE"
+            echo "$(date '+%Y-%m-%d %H:%M:%S'): Failed to restart ${svc}, port ${port} still not listening!" >> "$LOG_FILE"
         fi
     fi
 }
 
-# Function to check and start Apache2 service
-check_apache2() {
-    if ! service apache2 status > /dev/null 2>&1; then
-        echo "$(date): Apache2 service is not running. Attempting to start..." >> "$LOG_FILE"
-        service apache2 start
-        if service apache2 status > /dev/null 2>&1; then
-            echo "$(date): Apache2 service started successfully." >> "$LOG_FILE"
+# Import the SQL file exactly once, if MySQL is up and the marker file is absent
+import_db_once() {
+    if [ ! -f "$IMPORT_MARKER" ] && netstat -tln 2>/dev/null | grep -qE "[:\.]3306[[:space:]]+.*LISTEN"; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): MySQL is up; importing $SQL_FILE..." >> "$LOG_FILE"
+        mysql -h127.0.0.1 -uctf -p123456 < "$SQL_FILE"
+        if [ $? -eq 0 ]; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S'): Database import succeeded." >> "$LOG_FILE"
+            touch "$IMPORT_MARKER"
         else
-            echo "$(date): Failed to start Apache2 service." >> "$LOG_FILE"
+            echo "$(date '+%Y-%m-%d %H:%M:%S'): Database import FAILED!" >> "$LOG_FILE"
         fi
     fi
 }
 
-# Function to check and start SSH service
-check_ssh() {
-    if ! service ssh status > /dev/null 2>&1; then
-        echo "$(date): SSH service is not running. Attempting to start..." >> "$LOG_FILE"
-        service ssh start
-        if service ssh status > /dev/null 2>&1; then
-            echo "$(date): SSH service started successfully." >> "$LOG_FILE"
-        else
-            echo "$(date): Failed to start SSH service." >> "$LOG_FILE"
-        fi
-    fi
-}
-
-# Check if the script is already running
+# Initial check to avoid parallel runs
 check_running
 
-# Check MySQL and Apache2 services
-check_mysql
-check_apache2
-check_ssh
-
-# Execute every 5 seconds
+# Main loop: every 5 seconds, check ports/services, import DB once, then fetch flag
 while true; do
-    # Use curl to fetch content
-    QAXFLAG=$(curl -k https://${IP}/Getkey/index/index 2>/dev/null)
+    # 1) Port/service health checks
+    check_service_port 22   ssh
+    check_service_port 80   apache2
+    check_service_port 3306 mysql
 
-    # Check if the curl command was successful
+    # 2) Import SQL into MySQL exactly once
+    import_db_once
+
+    # 3) Original curl-based flag fetch (interval remains 5s)
+    QAXFLAG=$(curl -k https://${IP}/Getkey/index/index 2>/dev/null)
     if [ $? -eq 0 ]; then
-        # If successful, write the result to the environment variable and file
         export QAXFLAG
         echo "$QAXFLAG" > /flag
-        echo "$(date): Successfully fetched data and updated /flag" >> "$LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): Successfully fetched flag and wrote to /flag" >> "$LOG_FILE"
     else
-        # If failed, write 'no' to the environment variable and file
         QAXFLAG="no"
         export QAXFLAG
         echo "$QAXFLAG" > /flag
-        echo "$(date): Failed to fetch data from URL, set QAXFLAG to 'no'" >> "$LOG_FILE"
+        echo "$(date '+%Y-%m-%d %H:%M:%S'): Failed to fetch flag; set QAXFLAG='no' and wrote to /flag" >> "$LOG_FILE"
     fi
 
-    # Set permissions and ownership for /flag
-    chown root:root /flag  # Set owner to root
-    chmod 644 /flag        # Set permissions to read/write for owner, read for others
+    # Ensure /flag has the correct ownership and permissions
+    chown root:root /flag
+    chmod 644 /flag
 
-    # Wait for 5 seconds
+    # Wait 5 seconds before next iteration
     sleep 5
 done
